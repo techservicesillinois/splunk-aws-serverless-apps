@@ -1,0 +1,113 @@
+## The cloudwatch_to_splunk lambda function
+
+The porupose of this document is to serve as a guide for the service manager wishing
+to use the `cloudwatch_to_splunk` lambda function to automatically transmit service
+logs from AWS CloudWatch to Splunk as those log messages are generated.
+
+The source code for the lambda function deployed by Technology Services as
+*cloudwatch\_to\_splunk* is found in the [splunk-aws-serverless-apps GitHub repository]
+(https://github.com/techservicesillinois/splunk-aws-serverless-apps). This repository
+is a heavily-modified fork of the original code produced by
+[Splunk, Inc.](https://www.splunk.com/) and available in their
+[GitHub repository](https://github.com/splunk/splunk-aws-serverless-apps).
+
+### The lambda function as released by Splunk
+
+In brief, the lambda function is invoked by CloudWatch when it collects log messages that
+match the log filter specified by a product's deployment code for a product such as
+a container-based service running under ECS Fargate.
+
+The lambda function is invoked with a CloudWatch event object which contains a
+base 64-encoded ZIP-compressed payload. The decoded, uncompressed payload consists
+of a JSON object that contains metadata (like the CloudWatch log group and stream),
+along with one or more CloudWatch log messages. [Read more about
+CloudWatch events](https://docs.aws.amazon.com/AmazonCloudWatch/latest/events/EventTypes.html).
+
+The lambda code then establishes a connection to the Splunk web service using a
+[HTTP Event Collector](http://dev.splunk.com/view/event-collector/SP-CAAAE6M) (HEC)
+token and endpoint URL. The function then iterates over the log entries, transmitting
+each log entry to Splunk.
+In the Splunk-provided version of this code, the HEC token and endpoint URL are
+provided as environment variables stored in the lambda function's configuration.
+Splunk maintains an article [Use AWS Lambda with HTTP Event Collector](http://dev.splunk.com/view/event-collector/SP-CAAAE6W) that may provide useful background.
+
+### The Tech Services version of the lambda function
+
+We observed two shortcomings with the lambda function as released by Splunk for
+our AWS environment.
+
+* The lambda function uses a single HEC token. A HEC token has a N:1 relationship
+with a Splunk index (log stream), whereas we want each individual service to
+have its own index, so that access to logs can be restricted on a need-to-know
+basis.
+
+* The HEC token is visible to anyone with access to the AWS console or API.
+Though the worst that can happen with a HEC token in the wrong hands is
+production of "noise" in the Splunk logs, we would prefer to secure the HEC token. 
+
+In order to address these shortcomings, we removed the HEC token and endpoint from
+the lambda function's deployment environment. We added logic to retrieve these values
+from [Amazon SSM Parameter Store](https://docs.aws.amazon.com/systems-manager/latest/userguide/systems-manager-paramstore.html).
+
+Further, we developed caching of Splunk credentials in the lambda function.
+Assuming default values for ECS health checks, we expect a spurt of log messages
+to be generated **every 30 seconds for every ECS container**, including autoscaled
+containers. Caching session data for even a short interval (we choose 6 minutes as
+an initial default) will reduce unnecessary traffic to both SSM and to Splunk.
+
+Both successes and failures are cached; if lookup of the SSM parameters fails, or
+if those parameters fail to establish a connection to Splunk, this status is cached,
+and is only retried after the cache entry's time-to-live (TTL) passes. Likewise,
+a *successful* cache lookup and Splunk connection will be cached for the duration of
+the TTL, eliminating the need to retrieve that data from Amazon SSM or to re-establish
+a connection to the Splunk HEC endpoint.
+
+**NOTE:** The `cloudwatch_to_splunk` lambda function **should not** be deployed for
+individual services. The lambda function is managed centrally, and
+**is intended to be used by multiple services at scale**.
+
+### Storing Splunk logging configuration in Amazon SSM Parameter Store
+
+First, the SSM key (also known as a *path*) is computed based on a pre-defined
+prefix configured into the lambda function, and the CloudWatch log group. With
+the default prefix, `/cloudwatch_to_splunk` and a CloudWatch log group named
+`/service/authman`, the common prefix to all of Authman's SSM parameters would be
+`/cloudwatch_to_splunk/service/authman`.
+
+The values stored in the cache consist of three values:
+
+* hec_endpoint
+* hec_token
+* sourcetype
+
+The `hec_endpoint` and `hec_token` will be provided by the Splunk service manager.
+
+The `sourcetype` should be set in consultation with him, based on the type of log
+entries produced by your service.
+
+These will normally be created by the service developer or product owner using
+the AWS console at the time a service is being prepared for deployment.
+(**NOTE:** We have considered using Terraform to establish initial SSM parameter
+values; but we do not want to use Terraform to maintain SSM parameters in its
+saved state, particularly with respect to sensitive data like the `hec_token`.
+
+An example of the SSM variables and their description follows, using Authman
+as a prototype.
+
+SSM variable  | SSM description
+------------- | -------------
+| `/cloudwatch_to_splunk/service/authman/hec_endpoint` | Splunk HEC endpoint for cloudwatch\_to\_splunk's handling of log group /service/authman |
+| `/cloudwatch_to_splunk/service/authman/hec_token` | Splunk HEC token for cloudwatch\_to_\splunk's handling of log group /service/authman (**NOTE:** This value should be stored as a **SecureString**.) |
+| `/cloudwatch\_to\_splunk/service/authman/sourcetype` | Splunk sourcetype value to apply for logs of log group /service/authman |
+
+### The CloudWatch filter
+
+In order to establish a relationship between your service's CloudWatch log group and the
+cloudwatch\_to\_splunk function, the creation of a CloudWatch filter is necessary.
+The filter specifies two elements:
+
+* The target lambda function, which defaults to `cloudwatch_to_splunk`. 
+* An expression on which to filter CloudWatch log messages; log messages matching the
+filter are collected for transmission to the lambda function. The expression
+defaults to an empty string, meaning that the filter matches *all* log messages
+in the specified log group.

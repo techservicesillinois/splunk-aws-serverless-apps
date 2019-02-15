@@ -16,25 +16,26 @@
  * For details about Splunk logging library used below: https://github.com/splunk/splunk-javascript-logging
  */
 
+/*
+ * Git commit hash: @TAG@
+ */
+
 'use strict';
 
-const loggerConfig = {
-    url: process.env.SPLUNK_HEC_URL,
-    token: process.env.SPLUNK_HEC_TOKEN,
-    maxBatchCount: 0, // Manually flush events
-    maxRetries: 3,    // Retry 3 times
-};
-
+const AWS = require('aws-sdk');
+const path = require('path').posix;
 const SplunkLogger = require('splunk-logging').Logger;
 const zlib = require('zlib');
 
-const logger = new SplunkLogger(loggerConfig);
+// Read environment variables specifying the SSM prefix and Splunk cache TTL.
+const SSM_PREFIX = process.env.SSM_PREFIX;
+const SPLUNK_CACHE_TTL = process.env.SPLUNK_CACHE_TTL;
+
+const ssm = new AWS.SSM();
+const ssmCache = {};
 
 exports.handler = (event, context, callback) => {
     console.log('Received event:', JSON.stringify(event, null, 2));
-
-    // First, configure logger to automatically add Lambda metadata and to hook into Lambda callback
-    configureLogger(context, callback); // eslint-disable-line no-use-before-define
 
     // CloudWatch Logs data is base64 encoded so decode here
     const payload = new Buffer(event.awslogs.data, 'base64');
@@ -45,44 +46,12 @@ exports.handler = (event, context, callback) => {
         } else {
             const parsed = JSON.parse(result.toString('ascii'));
             console.log('Decoded payload:', JSON.stringify(parsed, null, 2));
-            let count = 0;
-            if (parsed.logEvents) {
-                parsed.logEvents.forEach((item) => {
-                    /* Send item message to Splunk with optional metadata properties such as time, index, source, sourcetype, and host.
-                    - Change "item.timestamp" below if time is specified in another field in the event.
-                    - Set or remove metadata properties as needed. For descripion of each property, refer to:
-                    http://docs.splunk.com/Documentation/Splunk/latest/RESTREF/RESTinput#services.2Fcollector */
-                    logger.send({
-                        message: item.message,
-                        metadata: {
-                            time: item.timestamp ? new Date(item.timestamp).getTime() / 1000 : Date.now(),
-                            host: 'serverless',
-                            source: `lambda:${context.functionName}`,
-                            sourcetype: 'httpevent',
-                            //index: 'main',
-                        },
-                    });
-
-                    count += 1;
-                });
-            }
-            // Send all the events in a single batch to Splunk
-            logger.flush((err, resp, body) => {
-                // Request failure or valid response from Splunk with HEC error code
-                if (err || (body && body.code !== 0)) {
-                    // If failed, error will be handled by pre-configured logger.error() below
-                } else {
-                    // If succeeded, body will be { text: 'Success', code: 0 }
-                    console.log('Response from Splunk:', body);
-                    console.log(`Successfully processed ${count} log event(s).`);
-                    callback(null, count); // Return number of log events
-                }
-            });
+            getSplunkLogger(parsed, context, callback);
         }
     });
 };
 
-const configureLogger = (context, callback) => {
+const configureLogger = (context, logger, callback) => {
     // Override SplunkLogger default formatter
     logger.eventFormatter = (event) => {
         // Enrich event only if it is an object
@@ -98,4 +67,148 @@ const configureLogger = (context, callback) => {
         console.log('error', error, 'context', payload);
         callback(error);
     };
+};
+
+const getSplunkLogger = (parsed, context, callback) => {
+    if (parsed.logGroup in ssmCache) {
+
+        const cacheEntry = ssmCache[parsed.logGroup];
+
+        if (cacheEntry && Date.now() <= cacheEntry.expireDT) {
+            if ('logger' in cacheEntry) {
+                console.log("found in cache for", parsed.logGroup);
+                CloudWatchToSplunk(parsed, context, cacheEntry.logger, cacheEntry.sourceType, callback);
+                return;
+            }
+
+            // FIXME Can this happen? Shouldn't this be a fatal error?
+            console.log("found in cache without logger for", parsed.logGroup);
+            return;
+        }
+
+        // FIXME Would be nice to split a cache miss from an expiration
+        console.log("not found in cache or expired for", parsed.logGroup);
+    }
+
+    const ssmPath = path.join(SSM_PREFIX, parsed.logGroup + "/");
+    // console.log("ssmPath", ssmPath);
+
+    const ssm_params = {
+        Names: [
+            path.join(ssmPath, 'hec_endpoint'),
+            path.join(ssmPath, 'hec_token'),
+            path.join(ssmPath, 'sourcetype'),
+        ],
+        WithDecryption: true
+    };
+
+    ssm.getParameters(ssm_params, function(error, ssmData) {
+        if (error)
+            callback(error);
+        else {
+            const keyData = {};
+
+            console.log('Data retrieved from SSM:', JSON.stringify(ssmData, null, 2));
+
+            if (ssmData.InvalidParameters.length > 0) {
+                const cacheExpireDT = Date.now() + SPLUNK_CACHE_TTL;
+                console.log('set expireDT to:', cacheExpireDT);
+                ssmCache[parsed.logGroup] = {
+                    expireDT: cacheExpireDT
+                };
+                console.log("wrote to cache without logger for", parsed.logGroup);
+
+                // TODO: Check proper way to do this.
+                callback(new Error("Missing required hec_token, hec_endpoint, or sourcetype"));
+                return;
+            }
+
+            if (ssmData.Parameters) {
+                // console.log('SSM parameters:', ssmData.Parameters);
+
+                ssmData.Parameters.forEach((item) => {
+                     /* TODO: Failure of index not being 0 should be an error. */
+                     if (item.Name.indexOf(ssmPath) == 0) {
+                         const name = item.Name.substring(ssmPath.length);
+                         keyData[name] = item.Value;
+                    }
+                }
+            )};
+
+            const loggerConfig = {
+                token: keyData.hec_token,
+                url: keyData.hec_endpoint,
+                maxBatchCount: 0, // Manually flush events
+                maxRetries: 3,    // Retry 3 times
+            };
+            // TODO: Check this when we have multiple logGroups to test with.
+            console.log('loggerConfig:', JSON.stringify(loggerConfig, null, 2));
+
+            const logger = new SplunkLogger(loggerConfig);
+            const cacheExpireDT = Date.now() + SPLUNK_CACHE_TTL;
+
+            console.log('set expireDT to:', cacheExpireDT);
+            ssmCache[parsed.logGroup] = {
+                logger: logger,
+                expireDT: cacheExpireDT,
+                sourceType: keyData.sourcetype
+            };
+
+            console.log("wrote to cache for", parsed.logGroup);
+            // FIXME: Maybe we should just pass in whole keyData object to
+            // extract logger and sourcetype inside function.
+            CloudWatchToSplunk(parsed, context, logger, keyData.sourcetype, callback);
+        }
+    });
+};
+
+const CloudWatchToSplunk = (parsed, context, logger, sourcetype, callback) => {
+    // First, configure logger to automatically add Lambda metadata and to hook into Lambda callback
+    configureLogger(context, logger, callback); // eslint-disable-line no-use-before-define
+
+    let identifier = "";
+    let prefix = "";
+    let index = parsed.logStream.lastIndexOf("/");
+
+    if (index >= 0) {
+        prefix = parsed.logStream.substring(0, index);
+        identifier = parsed.logStream.substring(index+1);
+    }
+
+    let count = 0;
+    if (parsed.logEvents) {
+        parsed.logEvents.forEach((item) => {
+            /* Send item message to Splunk with optional metadata properties such as time, index, source, sourcetype, and host.
+            - Change "item.timestamp" below if time is specified in another field in the event.
+            - Set or remove metadata properties as needed. For descripion of each property, refer to:
+            http://docs.splunk.com/Documentation/Splunk/latest/RESTREF/RESTinput#services.2Fcollector */
+
+            const log = {
+                message: item.message,
+                metadata: {
+                    time: item.timestamp ? new Date(item.timestamp).getTime() / 1000 : Date.now(),
+                    host: parsed.logGroup,
+                    source: parsed.logStream,
+                    sourcetype: sourcetype,
+                    //index: 'main',
+                },
+             };
+
+            console.log(log);
+            logger.send(log);
+            count += 1;
+        });
+    }
+    // Send all the events in a single batch to Splunk
+    logger.flush((err, resp, body) => {
+        // Request failure or valid response from Splunk with HEC error code
+        if (err || (body && body.code !== 0)) {
+            // If failed, error will be handled by pre-configured logger.error() below
+        } else {
+            // If succeeded, body will be { text: 'Success', code: 0 }
+            console.log('Response from Splunk:', body);
+            console.log(`Successfully processed ${count} log event(s).`);
+            callback(null, count); // Return number of log events
+        }
+    });
 };

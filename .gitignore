@@ -9,6 +9,7 @@ npm-debug.log
 
 # Artifacts from build & test
 *.zip
+*/package-lock.json
 packaged-template.yaml
 template.output.yaml
 lib

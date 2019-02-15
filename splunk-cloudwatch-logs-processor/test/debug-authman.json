@@ -1,0 +1,8 @@
+{
+    "context": { "functionName": "Woof!" },
+    "event": {
+        "awslogs": {
+            "data": "H4sIAAAAAAAAAM1RTW/bMAz9K4aui2yJ+rSDYchaLz10wID41gSFaquJ0MQ2LDnFUPS/l+lW7Adsh4kX8hF8j3x6IScfo9v75ufoSUWuV83q/nu92azWNVmQ4bn3E8IAUlkrpOECED4O+/U0zCN23JwOJ9f/Ajdp8u70By3mUPxOKaZgS+3gsaTadoxK64A6KxXVovOsZVz4B4tEcX6I7RTGFIb+WzgmP0VS3X1w0sd3iOzeFeuz79Ol/UJCh8JCSs0YSLDWKmasKAUwASCkFkxoxRVwZbQGLUtt8CrNODdGo2wKaEVyJ7yKK6lAslJwI9jiwyKkP6Q0dkvXtojco/zSReqeI004STt/huWlGod2yVmOpuW4Sa5ERjHueFlc+7YAxm3FTSVUJXj2ieHbZVuyrpus2F9c9VOBe6Q5fumC2/dDTKG9fM/nNIVzcMfspml+FDznW5IBY5ligPMUqy2pb7/SG++O6XB18O0TUkHOtoS8Lv7OIPPPDaL/gSm71zf5wfVdAAMAAA=="
+        }
+    }
+}

@@ -1,0 +1,44 @@
+#!  /usr/bin/env python3
+
+import argparse
+import base64
+import gzip
+import json
+import os
+import sys
+
+def main(argv):
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument \
+        ('--verbose', dest='verbose', action='count', default=0,
+         help='verbosity level')
+
+    #   Parse command-line arguments.
+    arg = parser.parse_args()
+
+    for line in sys.stdin:
+        generate_message(bytes(line, 'utf-8'))
+
+def generate_message(json_data):
+    compressed = gzip.compress(json_data)
+    encoded = base64.b64encode(compressed)
+
+    obj = \
+        {
+        'context'   : { },
+        'event'     : \
+            {
+            'awslogs'   : \
+                {
+                'data'  : encoded.decode(),
+                },
+            },
+
+        }
+
+    print(json.dumps(obj, separators=(',',':')))
+    sys.stdout.flush()
+
+if __name__ == '__main__':
+    main(sys.argv)

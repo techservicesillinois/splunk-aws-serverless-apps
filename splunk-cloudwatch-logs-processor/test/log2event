@@ -1,0 +1,75 @@
+#!  /usr/bin/env python3
+
+import argparse
+import os
+import random
+import string
+import sys
+
+import json
+
+from datetime import datetime, timedelta, timezone
+
+def generate_log_event(owner, log_group, events):
+    now  = datetime.now(timezone.utc)
+    dt = zzz_datetime(now)
+
+    json = {
+        "messageType": "DATA_MESSAGE",
+        "owner": owner,
+        "logGroup": log_group,
+        "logStream": "prod/apache-test/061dc7ef-1f20-4634-87eb-a8cbf5b8ff85",
+        "subscriptionFilters": [
+            log_group + "-filter"
+        ],
+        "logEvents": []
+    }
+
+    for event in events:
+        event = {
+            "id": zzz_digits(40), # TODO Can we do better?
+            "timestamp": int(1000 * dt.timestamp()),
+            "message": event,
+        }
+
+        json["logEvents"].append(event)
+
+    return json
+
+def main(argv):
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument \
+        ('--verbose', dest='verbose', action='count', default=0,
+         help='verbosity level')
+
+    #   Parse command-line arguments.
+    arg = parser.parse_args()
+
+    owner = zzz_digits(16)
+    log_group = '/service/roma'
+
+    for line in sys.stdin:
+        event = generate_log_event(owner, log_group, [ line.rstrip('\n') ])
+        print(json.dumps(event, separators=(',',':')))
+        sys.stdout.flush()
+
+    return 0
+
+
+def zzz_datetime(dt):
+    return dt - timedelta \
+        (minutes=random.randrange(0, 12), seconds=random.randrange(0, 60))
+
+
+def zzz_digits(l):
+    digits = ''
+
+    for i in range(l):
+        digits += random.choice(string.digits)
+
+    return digits
+
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv))
