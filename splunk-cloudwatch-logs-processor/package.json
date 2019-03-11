@@ -33,7 +33,7 @@
     "splunk-logging": "^0.9.3"
   },
   "devDependencies": {
-    "aws-sdk": "^2.380.0",
+    "aws-sdk": "^2.419.0",
     "babel-eslint": "^7.1.0",
     "eslint": "^3.12.0",
     "eslint-config-airbnb": "^13.0.0",

@@ -137,7 +137,7 @@ const getSplunkLogger = (parsed, context, callback) => {
 
             const loggerConfig = {
                 token: keyData.hec_token,
-                url: keyData.hec_endpoint,
+                url: keyData.hec_endpoint + '/event',
                 maxBatchCount: 0, // Manually flush events
                 maxRetries: 3,    // Retry 3 times
             };
@@ -184,15 +184,37 @@ const CloudWatchToSplunk = (parsed, context, logger, sourcetype, callback) => {
             http://docs.splunk.com/Documentation/Splunk/latest/RESTREF/RESTinput#services.2Fcollector */
 
             const log = {
+                host: parsed.logGroup,
+                source: parsed.logStream,
+                sourcetype: sourcetype,
                 message: item.message,
+                fields: {
+                    animal: "cat",
+                    sound: "meow"
+                },
                 metadata: {
                     time: item.timestamp ? new Date(item.timestamp).getTime() / 1000 : Date.now(),
                     host: parsed.logGroup,
                     source: parsed.logStream,
                     sourcetype: sourcetype,
-                    //index: 'main',
-                },
+                }
              };
+/*
+#           const log = {
+#               message: item.message,
+#               metadata: {
+#                   time: item.timestamp ? new Date(item.timestamp).getTime() / 1000 : Date.now(),
+#                   host: parsed.logGroup,
+#                   source: parsed.logStream,
+#                   sourcetype: sourcetype,
+#                   //index: 'main',
+#                   fields: {
+#                       animal: "cat",
+#                       sound: "meow"
+#                   }
+#               },
+#            };
+ */
 
             console.log(log);
             logger.send(log);
