@@ -35,36 +35,24 @@ const ssm = new AWS.SSM();
 const ssmCache = {};
 
 /**
- * Initializes metadata. If <code>context.metadata</code> is false or empty,
- * return an empty object.
+ * Wrap _initializeMetadata from splunk-logging module
+ * to add optional "fields" metadata to the metadata object,
+ * thereby allowing any metadata specified in that object
+ * to go to Splunk.
  *
- * @param {object} context
- * @returns {object} metadata
- * @private
+ * See http://dev.splunk.com/view/event-collector/SP-CAAAE6P.
  */
-const initializeMetadata = function(context) {
-    var metadata = {};
-    if (context && context.hasOwnProperty("metadata")) {
-        if (context.metadata.hasOwnProperty("time")) {
-            metadata.time = context.metadata.time;
+const initializeMetadata = function(fun) {
+    return function(context) {
+        var metadata = fun(context);
+
+        if (context && context.hasOwnProperty("metadata")) {
+            if (context.metadata.hasOwnProperty("fields")) {
+                metadata.fields = context.metadata.fields;
+            }
         }
-        if (context.metadata.hasOwnProperty("fields")) {
-            metadata.fields = context.metadata.fields;
-        }
-        if (context.metadata.hasOwnProperty("host")) {
-            metadata.host = context.metadata.host;
-        }
-        if (context.metadata.hasOwnProperty("source")) {
-            metadata.source = context.metadata.source;
-        }
-        if (context.metadata.hasOwnProperty("sourcetype")) {
-            metadata.sourcetype = context.metadata.sourcetype;
-        }
-        if (context.metadata.hasOwnProperty("index")) {
-            metadata.index = context.metadata.index;
-        }
-    }
-    return metadata;
+        return metadata;
+    };
 };
 
 exports.handler = (event, context, callback) => {
@@ -181,7 +169,7 @@ const getSplunkLogger = (parsed, context, callback) => {
             console.log("!!!!! loggerConfig: " + JSON.stringify(loggerConfig, null, 2) + " !!!!!");
 
             const logger = new SplunkLogger(loggerConfig);
-            logger._initializeMetadata = initializeMetadata;
+            logger._initializeMetadata = initializeMetadata(logger._initializeMetadata);
             const cacheExpireDT = Date.now() + SPLUNK_CACHE_TTL;
 
             console.log('set expireDT to:', cacheExpireDT);
@@ -234,22 +222,6 @@ const CloudWatchToSplunk = (parsed, context, logger, sourcetype, callback) => {
                 }
              };
 
-/*
-#           const log = {
-#               message: item.message,
-#               metadata: {
-#                   time: item.timestamp ? new Date(item.timestamp).getTime() / 1000 : Date.now(),
-#                   host: parsed.logGroup,
-#                   source: parsed.logStream,
-#                   sourcetype: sourcetype,
-#                   //index: 'main',
-#                   fields: {
-#                       animal: "cat",
-#                       sound: "meow"
-#                   }
-#               },
-#            };
- */
             console.log("@@@@@ before logger.send():", log, "@@@@@");
             logger.send(log);
             count += 1;
