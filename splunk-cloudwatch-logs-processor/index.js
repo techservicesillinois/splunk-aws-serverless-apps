@@ -53,6 +53,8 @@ exports.handler = (event, context, callback) => {
 
 const configureLogger = (context, logger, callback) => {
     // Override SplunkLogger default formatter
+    // TODO: We tried this; it didn't make any difference.
+    // logger.eventFormatter = (event) => { return event };
     logger.eventFormatter = (event) => {
         // Enrich event only if it is an object
         if (typeof event === 'object' && !Object.prototype.hasOwnProperty.call(event, 'awsRequestId')) {
@@ -137,12 +139,13 @@ const getSplunkLogger = (parsed, context, callback) => {
 
             const loggerConfig = {
                 token: keyData.hec_token,
+                // TODO: This should be done in SSM.
                 url: keyData.hec_endpoint + '/event',
                 maxBatchCount: 0, // Manually flush events
                 maxRetries: 3,    // Retry 3 times
             };
             // TODO: Check this when we have multiple logGroups to test with.
-            console.log('loggerConfig:', JSON.stringify(loggerConfig, null, 2));
+            console.log("!!!!! loggerConfig: " + JSON.stringify(loggerConfig, null, 2) + " !!!!!");
 
             const logger = new SplunkLogger(loggerConfig);
             const cacheExpireDT = Date.now() + SPLUNK_CACHE_TTL;
@@ -184,21 +187,19 @@ const CloudWatchToSplunk = (parsed, context, logger, sourcetype, callback) => {
             http://docs.splunk.com/Documentation/Splunk/latest/RESTREF/RESTinput#services.2Fcollector */
 
             const log = {
-                host: parsed.logGroup,
-                source: parsed.logStream,
-                sourcetype: sourcetype,
                 message: item.message,
-                fields: {
-                    animal: "cat",
-                    sound: "meow"
-                },
                 metadata: {
                     time: item.timestamp ? new Date(item.timestamp).getTime() / 1000 : Date.now(),
                     host: parsed.logGroup,
                     source: parsed.logStream,
                     sourcetype: sourcetype,
+                    fields: {
+                        animal: "cat",
+                        sound: "meow"
+                    }
                 }
              };
+
 /*
 #           const log = {
 #               message: item.message,
@@ -215,8 +216,7 @@ const CloudWatchToSplunk = (parsed, context, logger, sourcetype, callback) => {
 #               },
 #            };
  */
-
-            console.log(log);
+            console.log("@@@@@ before logger.send():", log, "@@@@@");
             logger.send(log);
             count += 1;
         });
