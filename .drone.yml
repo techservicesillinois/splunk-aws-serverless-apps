@@ -1,6 +1,6 @@
 pipeline:
   build:
-    image: node:6.10-alpine
+    image: node:8.10-alpine
     environment:
         NPM_CONFIG_LOGLEVEL:    error
     commands:
