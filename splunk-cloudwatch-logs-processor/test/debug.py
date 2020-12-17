@@ -1,20 +1,15 @@
 #!  /usr/bin/env python3
 
 # import argparse
+import json
 import os
 import sys
 
 #   FIXME: hack
 sys.path.insert(0, '..')
 
-print(sys.path)
-
 import splunk
 
-print(dir(splunk))
-
-#const handler = require('../index.js').handler;
-#
 #let callCount = 0;
 #
 #function callback(error, count) {
@@ -24,9 +19,7 @@ print(dir(splunk))
 #
 #   console.log(error);
 #}
-#
-#process.stdin.setEncoding('utf8');
-#
+
 #process.stdin.on('readable', () => {
 #  const chunk = process.stdin.read();
 #
@@ -60,8 +53,19 @@ def main(argv):
 #   #   TODO: See if package name can be autodiscovered.
 #   init_logging(level=logging.INFO, addl_loggers=[ 'webdocs_content' ])
 
+    count = 0
+
     with open('debug-roma.json') as stream:
-        print(stream)
+        #   TODO: Need a while loop here.
+        data = stream.read()
+
+        if data:
+            count += 1
+            print(f'===== BEGIN REQUEST ({count}) =====')
+
+            parsed = json.loads(data)
+            print(parsed)
+            splunk.handler(parsed['event'], parsed['context'])
     # end with.
 
     return 0
