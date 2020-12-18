@@ -1,11 +1,11 @@
-FROM	node:8.10-alpine
+FROM	python:3.8-slim
 
 WORKDIR	/usr/src
 
-ENV	NPM_CONFIG_LOGLEVEL=error
+RUN	pip install \
+		awscli	\
+	;
 
-RUN	apk update && apk add zip
+COPY	splunk.py /usr/src
 
-COPY	index.js package.json /usr/src/
-
-RUN	npm install --production && npm run build:zip;
+#RUN	npm install --production && npm run build:zip;

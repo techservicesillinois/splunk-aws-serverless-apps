@@ -51,7 +51,15 @@ def get_splunk_logger(parsed, context):
 
 #####
 
+def fart(event, context):
+    return
+
+#####
+
 def handler(event, context):
+    '''
+    Handle CloudWatch event, and stream to Splunk's HTTP event collector API.
+    '''
     print('Received event:', json.dumps(event, indent=2))
     print('Received context:', json.dumps(context, indent=2))
 

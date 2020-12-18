@@ -1,40 +1,155 @@
-#!  /usr/bin/env python3
+#   /usr/bin/env python3
 
 import argparse
 import os
 import random
 import string
 import sys
+import uuid
 
 from attrdict import AttrDict
 from datetime import datetime, timedelta, timezone
 
 from jinja2 import Environment, Template
 
-#   [17/Dec/2018:17:28:19 +0000]
-FMT_STRFTIME = '%d/%b/%Y:%H:%M:%S %z'
+FMT_STRFTIME    = '%d/%b/%Y:%H:%M:%S %z'
+
+FMT_LOG_MSG     = '{ip} - - [{tstamp}] "{method} /{url}/ HTTP/1.1" 200 {size}'
+
+LOG_GROUP       = '/service/splunk-test'
+
+TEMPLATE_NAME   = 'cloudwatch.j2'
+
+#####
+
+class RandomValues:
+
+    #####
+
+    @classmethod
+    def _alpha_string(cls, length):
+        str = ''
+
+        for i in range(length):
+            str += random.choice(string.ascii_lowercase)
+
+        return str
+
+    #####
+
+    @classmethod
+    def _datetime(cls, dt):
+        return dt - timedelta \
+            (minutes=random.randrange(0, 12), seconds=random.randrange(0, 60))
+
+    #####
+
+    @classmethod
+    def _digits(cls, length):
+        digits = ''
+
+        for i in range(length):
+            digits += random.choice(string.digits)
+
+        return digits
+
+    #####
+
+    @classmethod
+    def _ip_address(cls):
+        return '.'.join(map(str, (random.randint(1, 254) for _ in range(4))))
+
+    #####
+
+    _method_list = [ 'GET', 'HEAD', 'POST', 'PUT' ]
+
+    @classmethod
+    def _method(cls):
+        return random.choice(cls._method_list)
+
+    #####
+
+    @classmethod
+    def _timestamp(cls, dt):
+        return dt.strftime(FMT_STRFTIME)
+
+    #####
+
+    @classmethod
+    def _url(cls):
+        return '/'.join((cls._alpha_string(3), cls._alpha_string(8)))
+
+#####
+
+class RandomEvents:
+
+    #####
+
+    @classmethod
+    def __init__(cls, dt, low, high):
+        cls.datetime = dt
+        cls.range = range(random.randrange(low, high))
+
+        cls.jinja_dict = \
+            {
+            'log_group'     : LOG_GROUP,
+            'log_events'    : [],
+            'log_stream'    : 'test/' + str(uuid.uuid1()),
+            'owner'         : RandomValues._digits(16),
+            }
+
+    #####
+
+    @classmethod
+    def to_jinja_dict(cls):
+        dt_list = []
+
+        dt_list.extend \
+            ([RandomValues._datetime(cls.datetime) for r in cls.range ])
+
+        #   Sort in place.
+        dt_list.sort()
+
+        for i in cls.range:
+            event = generate_random_log_event(dt_list[i])
+            cls.jinja_dict['log_events'].append(event)
+
+        return cls.jinja_dict
+
+#####
+
+class RandomLogMessage:
+
+    #####
+
+    def __init__(self, dt):
+        self.attrs = \
+            {
+            'ip'        : RandomValues._ip_address(),
+            'method'    : RandomValues._method(),
+            'size'      : random.randrange(40, 1000),
+            'tstamp'    : RandomValues._timestamp(dt),
+            'url'       : RandomValues._url(),
+            }
+
+        return
+
+    #####
+
+    def __str__(self):
+        return FMT_LOG_MSG.format(**self.attrs)
+
+#####
 
 def generate_random_log_event(dt):
-    str_logevent = r'10.224.242.91 - - [{0}] \"{1} /jrr/{2}/ HTTP/1.1\" 200 {3}'
-
-    fmt_logevent = \
-        (str_logevent.format \
-            (dt.strftime(FMT_STRFTIME),
-             zzz_method(),
-             zzz_alpha_string(8),
-             random.randrange(40, 1000)
-            )
-        )
-
-    event = \
+    return \
         {
-        'id'            : zzz_digits(40),
-        'timestamp'     : int(1000 * dt.timestamp()),
-    #   'message'       : r'10.224.242.91 - - [{0}] \"GET /jrr/ HTTP/1.1\" 200 45' \
-        'message'       : fmt_logevent,
+        'id'        : uuid.uuid1(),
+        'timestamp' : int(1000 * dt.timestamp()),
+        'message'   : str(RandomLogMessage(dt)),
         }
 
-    return event
+#####
 
 def main(argv):
     #   Don't buffer standard output.
@@ -49,71 +164,17 @@ def main(argv):
     #   Parse command-line arguments.
     arg = parser.parse_args()
 
-    now  = datetime.now(timezone.utc)
-    then = now - timedelta(minutes=34, seconds=46)
-
-    #print(now.strftime(FMT_STRFTIME))
-
-    TEMPLATE_NAME   = 'cloudwatch.j2'
+    now  = datetime.now().astimezone()
 
     jinja_env = Environment()
 
     with open(TEMPLATE_NAME, 'r') as stream:
         template = Template(stream.read())
 
-    jinjadict = \
-        {
-        'owner'         : zzz_digits(16),
-        'log_group'     : '/service/roma',
-        'log_events'    : [],
-        }
+    jinja_dict = RandomEvents(now, 1, 6).to_jinja_dict()
 
-    event_range = range(random.randrange(1, 6))
-
-    dt_list = []
-    dt_list.extend([zzz_datetime(now) for r in event_range ])
-    dt_list.sort()
-
-    for i in event_range:
-        event = generate_random_log_event(dt_list[i])
-        jinjadict['log_events'].append(event)
-
-    print(template.render(jinjadict))
-
+    print(template.render(jinja_dict))
     return 0
-
-_method_list = [ 'GET', 'HEAD', 'POST', 'PUT' ]
-
-#####
-
-def zzz_datetime(dt):
-    return dt - timedelta \
-        (minutes=random.randrange(0, 12), seconds=random.randrange(0, 60))
-
-#####
-
-def zzz_digits(l):
-    digits = ''
-
-    for i in range(l):
-        digits += random.choice(string.digits)
-
-    return digits
-
-#####
-
-def zzz_alpha_string(l):
-    str = ''
-
-    for i in range(l):
-        str += random.choice(string.ascii_lowercase)
-
-    return str
-
-#####
-
-def zzz_method():
-    return random.choice(_method_list)
 
 #####
 

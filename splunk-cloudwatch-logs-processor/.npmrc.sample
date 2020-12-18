@@ -1,5 +1,0 @@
-sam_s3_bucket_name = fake-s3-bucket
-parm_cwl_group_name = fakeCloudWatchLogsGroupName
-parm_hec_url = https://192.168.0.0:8088/services/collector
-parm_hec_token = FAKE-HEC-TOKEN
-parm_stack_name = FakeLoggingStack
